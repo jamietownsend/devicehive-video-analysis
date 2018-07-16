@@ -14,6 +14,7 @@
 
 
 import sys, os, os.path
+import numpy as np
 
 import time
 import logging.config
@@ -52,8 +53,8 @@ def evaluate(_):
     
     out = FLAGS.out_name
     if out == '':
-        out = '%s-conv%s' % os.path.splitext(video)
-    writer = imageio.get_writer(out, fps=source_fps)
+        out = '%s-alpha%s' % os.path.splitext(video)
+    writer = imageio.get_writer(out, fps=source_fps, pixelformat='rgba', codec=FLAGS.codec, macro_block_size=8)
     
     model_cls = find_class_by_name(FLAGS.model_name, [yolo])
     model = model_cls(input_shape=(source_h, source_w, 3))
@@ -72,6 +73,8 @@ def evaluate(_):
 
             predictions = model.evaluate(frame)
 
+            over = np.zeros((frame.shape[0], frame.shape[1], 4), dtype=frame.dtype)
+
             for o in predictions:
                 x1 = o['box']['left']
                 x2 = o['box']['right']
@@ -80,19 +83,21 @@ def evaluate(_):
                 y2 = o['box']['bottom']
 
                 color = o['color']
+                if len(color) == 3: color.append(255)
+
                 class_name = o['class_name']
 
                 # Draw box
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.rectangle(over, (x1, y1), (x2, y2), color, 2)
 
                 # Draw label
                 (test_width, text_height), baseline = cv2.getTextSize(
                     class_name, cv2.FONT_HERSHEY_TRIPLEX, 0.75, 1)
-                cv2.rectangle(frame, (x1, y1),
+                cv2.rectangle(over, (x1, y1),
                               (x1+test_width, y1-text_height-baseline),
                               color, thickness=cv2.FILLED)
-                cv2.putText(frame, class_name, (x1, y1-baseline),
-                            cv2.FONT_HERSHEY_TRIPLEX, 0.75, (0, 0, 0), 1)
+                cv2.putText(over, class_name, (x1, y1-baseline),
+                            cv2.FONT_HERSHEY_TRIPLEX, 0.75, (0, 0, 0, 255), 1)
 
             end_time = time.time()
             fps = fps * 0.9 + 1/(end_time - start_time) * 0.1
@@ -105,7 +110,7 @@ def evaluate(_):
             logger.info(frame_info)
 
             #cv2.imshow(win_name, frame)
-            writer.append_data(frame[:, :, ::-1])
+            writer.append_data(over[:, :, :])
 
             if predictions:
                 logger.info('Predictions: {}'.format(
@@ -123,6 +128,8 @@ def evaluate(_):
 
             frame_num += 1
 
+            # if frame_num > 5: break
+
     finally:
         cv2.destroyAllWindows()
         cam.release()
@@ -134,5 +141,6 @@ if __name__ == '__main__':
     tf.flags.DEFINE_string('video', '', 'Path to the video file.')
     tf.flags.DEFINE_string('model_name', 'Yolo2Model', 'Model name to use.')
     tf.flags.DEFINE_string('out_name', '', 'Name of output file')
+    tf.flags.DEFINE_string('codec', 'prores_ks', 'Video encoding codec')
 
     tf.app.run(main=evaluate)
